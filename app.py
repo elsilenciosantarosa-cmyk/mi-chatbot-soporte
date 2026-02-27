@@ -34,10 +34,11 @@ def load_knowledge_base(api_key):
     docs_path = "documentos"
     
     if not os.path.exists(docs_path):
-        os.makedirs(docs_path)
         return None
 
-    files = glob.glob(os.path.join(docs_path, "*.pdf")) + glob.glob(os.path.join(docs_path, "*.txt"))
+    # Buscar archivos (insensible a mayúsculas/minúsculas)
+    all_files = os.listdir(docs_path)
+    files = [os.path.join(docs_path, f) for f in all_files if f.lower().endswith(('.pdf', '.txt'))]
     
     if not files:
         return None
@@ -45,12 +46,16 @@ def load_knowledge_base(api_key):
     documents = []
     for file_path in files:
         try:
-            if file_path.endswith(".pdf"):
+            if file_path.lower().endswith(".pdf"):
                 loader = PyPDFLoader(file_path)
-            else:
+                documents.extend(loader.load())
+            elif file_path.lower().endswith(".txt"):
+                # Este cambio permite leer archivos con acentos sin error
                 loader = TextLoader(file_path, encoding='utf-8')
-            documents.extend(loader.load())
-        except Exception:
+                documents.extend(loader.load())
+        except Exception as e:
+            # Si falla un archivo, lo ignoramos y seguimos
+            print(f"Error en {file_path}: {e}")
             continue
 
     if not documents:
@@ -62,9 +67,7 @@ def load_knowledge_base(api_key):
     embeddings = OpenAIEmbeddings(openai_api_key=api_key)
     vectorstore = Chroma.from_documents(chunks, embeddings)
     
-    return vectorstore
-
-# Cargar el bot
+    return vectorstore# Cargar el bot
 with st.spinner("Cargando base de conocimiento..."):
     vectorstore = load_knowledge_base(api_key)
 
@@ -102,3 +105,4 @@ if prompt := st.chat_input("Escribe tu consulta..."):
             st.markdown(response)
             
     st.session_state.history.append({"role": "assistant", "content": response})
+
