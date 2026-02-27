@@ -2,8 +2,7 @@ import streamlit as st
 import os
 import glob
 
-# --- PARCHE PARA STREAMLIT CLOUD (Soluciona errores de base de datos comunes en la nube) ---
-# Esto es técnico, pero necesario para que ChromaDB funcione en servidores gratuitos.
+# --- PARCHE PARA STREAMLIT CLOUD (Sqlite) ---
 try:
     __import__('pysqlite3')
     import sys
@@ -11,9 +10,10 @@ try:
 except ImportError:
     pass
 
+# --- IMPORTACIONES CORREGIDAS ---
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
-from langchain.text_splitter import CharacterTextSplitter
+from langchain_text_splitters import CharacterTextSplitter  # <--- CAMBIO IMPORTANTE
 from langchain_chroma import Chroma
 from langchain.chains import ConversationalRetrievalChain
 
@@ -22,20 +22,20 @@ st.set_page_config(page_title="Agente IA Soporte", page_icon="🤖")
 st.title("🤖 Agente de Atención al Cliente")
 
 # --- 1. GESTIÓN DE LA API KEY (SEGURA) ---
-# En la nube, leeremos la clave desde los secretos de Streamlit
 api_key = st.secrets.get("OPENAI_API_KEY")
 
 if not api_key:
     st.error("⚠️ No se ha configurado la API Key en los secretos de Streamlit.")
     st.stop()
 
-# --- 2. CARGA DE CONOCIMIENTO (TU "ENTRENAMIENTO") ---
-# Usamos caché para no procesar los archivos cada vez que el usuario escribe
+# --- 2. CARGA DE CONOCIMIENTO ---
 @st.cache_resource
 def load_knowledge_base(api_key):
     docs_path = "documentos"
     
+    # Crear carpeta si no existe (para evitar errores iniciales)
     if not os.path.exists(docs_path):
+        os.makedirs(docs_path)
         return None
 
     files = glob.glob(os.path.join(docs_path, "*.pdf")) + glob.glob(os.path.join(docs_path, "*.txt"))
@@ -52,24 +52,28 @@ def load_knowledge_base(api_key):
                 loader = TextLoader(file_path, encoding='utf-8')
             documents.extend(loader.load())
         except Exception as e:
-            st.warning(f"Error leyendo {file_path}: {e}")
+            st.warning(f"Error leyendo archivo {os.path.basename(file_path)}: {e}")
             continue
 
-    # Dividir en trozos
+    if not documents:
+        return None
+
+    # Dividir en trozos (usando la nueva librería)
     text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
     chunks = text_splitter.split_documents(documents)
 
-    # Crear base de datos vectorial en memoria (rápido y gratis)
+    # Crear base de datos
     embeddings = OpenAIEmbeddings(openai_api_key=api_key)
     vectorstore = Chroma.from_documents(chunks, embeddings)
     
     return vectorstore
 
 # Cargar el bot
-vectorstore = load_knowledge_base(api_key)
+with st.spinner("Cargando base de conocimiento..."):
+    vectorstore = load_knowledge_base(api_key)
 
 if not vectorstore:
-    st.warning("No se encontraron documentos. Añade PDFs o TXT a la carpeta 'documentos'.")
+    st.warning("👋 No se encontraron documentos. Por favor, añade archivos PDF o TXT a la carpeta 'documentos' en GitHub.")
     st.stop()
 
 # --- 3. LÓGICA DEL CHAT ---
@@ -93,10 +97,14 @@ if prompt := st.chat_input("Escribe tu consulta..."):
 
     # Generar respuesta
     with st.chat_message("assistant"):
-        with st.spinner("Analizando documentos..."):
-            # Preparar historial para LangChain (formato tuplas)
-            chat_history_formatted = [(st.session_state.history[i]["content"], st.session_state.history[i+1]["content"]) 
-                                      for i in range(0, len(st.session_state.history)-1, 2)]
+        with st.spinner("Pensando..."):
+            # Formatear historial para LangChain
+            chat_history_formatted = []
+            for i in range(0, len(st.session_state.history)-1, 2):
+                 if i+1 < len(st.session_state.history):
+                     q = st.session_state.history[i]["content"]
+                     a = st.session_state.history[i+1]["content"]
+                     chat_history_formatted.append((q, a))
             
             result = chain.invoke({"question": prompt, "chat_history": chat_history_formatted})
             response = result['answer']
