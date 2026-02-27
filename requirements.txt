@@ -1,10 +1,10 @@
 streamlit
 openai
-langchain
-langchain-openai
-langchain-community
-langchain-chroma
-langchain-text-splitters
-chromadb
+langchain==0.2.14
+langchain-openai==0.1.22
+langchain-community==0.2.12
+langchain-chroma==0.1.2
+langchain-text-splitters==0.2.2
+chromadb==0.5.5
 pypdf
 pysqlite3-binary
